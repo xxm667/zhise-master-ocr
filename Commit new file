@@ -1,0 +1,222 @@
+从http.server导入BaseHTTPRequestHandler
+导入json
+导入base64
+导入请求
+从日期时间导入日期时间
+从urllib.parse导入urlparse，parse_qs
+
+# 您的百度光学字符识别配置-从环境变量读取
+导入操作系统
+
+APP_ID = os.environ.get('百度_APP_ID '，' 121949966 ')
+API_KEY = os.environ.get('百度_API_KEY '，' e1nMqdo8EZJ8TYjAJVfjlXQI ')
+秘密密钥=操作系统。环境。get(' BAIDU _ SECRET _ KEY '，' gcqyb 0 a 7 axifpdeyenyyolohubksjjmzw ')
+
+def get_baidu_token():
+"""获取百度光学字符识别的访问令牌“”
+URL = " https://AIP。百度BCE。com/oauth/2.0/token "
+params = {
+"授权类型":"客户端证书"，
+"客户端id”:API _ KEY，
+“客户秘密”:秘密密钥
+    }
+尝试:
+response = requests.get(url，params=params，timeout=10)
+response.raise_for_status()
+返回response.json().get("access_token ")
+例外情况为e:
+打印(f "获取代币失败:{e} ")
+不返回
+
+def call_baidu_ocr(image_base64，token):
+"""调用百度光学字符识别表格识别"""
+URL = f " https://AIP。百度BCE。com/rest/2.0/ocr/v1/table？访问令牌= {令牌}
+    
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    
+    data = {
+        "image": image_base64,
+        "cell_contents": "true",
+        "return_excel": "false"
+    }
+    
+尝试:
+response = requests.post(url，headers=headers，data=data，timeout=30)
+response.raise_for_status()
+return response.json()
+例外情况为e:
+打印(f"OCR调用失败:{e} ")
+return {"error": f"OCR服务调用失败:{str(e)}"}
+
+定义parse_color_table(ocr_result):
+"""解析光学字符识别结果,提取工党数据"""
+尝试:
+如果ocr_result中出现"错误代码":
+返回{ "错误":f "百度光学字符识别错误:{ocr_result.get('error_msg '，'未知错误')}"}
+        
+如果"表单结果"不在光学字符识别结果中：
+返回{ "错误": "未识别到表格数据"}
+        
+forms = ocr _ result[" forms _ result "]
+如果不是表格:
+返回{ "错误": "表格为空"}
+        
+        # 提取所有单元格
+        cells = []
+        for form in forms:
+            for cell in form.get("body", []):
+                cells.append({
+                    "row": cell.get("row"),
+                    "col": cell.get("col"),
+                    "word": cell.get("word", "").strip()
+                })
+        
+        # 按行分组
+        rows = {}
+对于单元格中的单元格:
+row_num =单元格["row"]
+如果row_num不在行中:
+rows[row_num] = []
+行数[row_num]。追加(单元格)
+        
+        # 查找包含角度的行
+        results = {}
+        for row_num, row_cells in rows.items():
+            # 按列排序
+            row_cells.sort(key=lambda x: x["col"])
+            
+            # 检查第一列是否包含角度
+            if row_cells and '°' in row_cells[0]["word"]:
+                try:
+                    # 提取角度数字
+                    angle_text = row_cells[0]["word"].replace('°', '').strip()
+                    angle = int(''.join(filter(str.isdigit, angle_text)))
+                    
+                    # 尝试提取Lab值
+                    lab_values = []
+                    for i in range(1, min(4, len(row_cells))):
+                        try:
+                            value = float(row_cells[i]["word"])
+                            lab_values.append(value)
+                        except:
+                            break
+                    
+                    if len(lab_values) == 3:
+                        results[angle] = {
+                            "L": lab_values[0],
+                            "a": lab_values[1],
+                            "b": lab_values[2]
+                        }
+                        print(f"成功解析角度 {angle}°: L={lab_values[0]}, a={lab_values[1]}, b={lab_values[2]}")
+                        
+                except Exception as e:
+                    print(f"解析行 {row_num} 失败: {e}")
+                    continue
+        
+        # 角度映射：105° → 110°
+        mapped_results = {}
+        for angle, values in results.items():
+            target_angle = 110 if angle == 105 else angle
+            mapped_results[target_angle] = values
+        
+        if not mapped_results:
+            return {"error": "未能识别到有效的颜色数据"}
+        
+        return {"success": True, "data": mapped_results}
+        
+    except Exception as e:
+        print(f"解析失败: {e}")
+        return {"error": f"数据解析失败: {str(e)}"}
+
+class handler(BaseHTTPRequestHandler):
+    def do_OPTIONS(self):
+"""处理CORS预检请求"""
+self.send_response(200)
+self . send _ header(' Access-Control-Allow-Origin '，' * ')
+        self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
+    
+    def do_POST(self):
+        """处理POST请求"""
+尝试:
+            # 读取请求数据
+Content _ Length = int(self。标题['内容长度'])
+post _ data = self .rfile .阅读（内容长度)
+请求数据= json.loads(后数据)
+            
+            # 获取图片数据
+image _ base64 = request _ data .get(" image "，"")
+如果不是image_base64:
+self.send_error_response("缺少图片数据")
+返回
+            
+# 获取百度光学字符识别令牌
+token = get_baidu_token()
+如果不是令牌:
+self.send_error_response("OCR服务初始化失败")
+返回
+            
+# 调用光学字符识别
+从http.server导入BaseHTTPRequestHandler
+            
+如果ocr_result中出现"错误":
+自我发送错误响应(ocr结果["错误"])
+返回
+            
+            # 解析数据
+parsed _ data = parse _ color _ table(ocr _结果)
+            
+如果已解析数据中出现"错误":
+自我send _ error _ response(parsed _ data[" error "])
+返回
+            
+            # 确保5个角度都有数据
+所需角度= [15，25，45，75，110]
+final_data = {}
+对于所需角度中的角度:
+如果角度inparsed_data["data"]:
+最终数据[角度] =解析数据["数据"][角度]
+否则:
+                    # 如果缺失，填充默认值
+final _ data[angle]= {“L”:0.0，“a”:0.0，“b”:0.0 }
+            
+            # 返回成功响应
+响应数据= {
+“成功”:真的，
+◎数据:最终数据，
+"角度":list(final_data.keys())，
+"已确认:len([v for v in final _ data。values() if v["L "]！= 0),
+"时间戳例如:datetime.now().等格式()
+            }
+            
+自我。发送成功响应(响应数据)
+            
+除了JSON的JSONDECODEError:
+自我发送错误响应(用于日期信息)
+例外情况为e:
+打印(F "服务器错误:{e}
+自我发送_错误_回应（费勒 因纳哈尔布 德斯服务器:{str(e)} "
+    
+极好的发送成功响应（自身,数据):
+        """发送成功响应"""
+self.send_response(200)
+self.send_header('内容类型,应用程序/JSON’)
+自我send _ header(' Access-Control-Allow-Origin ' '，*)
+self.end_headers()
+        
+response_json = json.dumps(数据,确保_ascii=False)
+自我文件。写作（回应JSON的。编码(“utf-8”)
+    
+极好的发送错误响应（自身,错误消息):
+        """发送错误响应"""
+self.send_response(400)
+self.send_header('内容类型,应用程序/JSON’)
+自我send _ header(' Access-Control-Allow-Origin ' '，*)
+self.end_headers()
+        
+错误数据= {
+“成功”:假的，
+“错误”:错误消息
+        }
+self.wfile.write(转储（错误_数据)。编码(“utf-8”))
